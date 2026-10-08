@@ -1,0 +1,6 @@
+.DS_Store
+build/
+test/test_runner
+*.o
+.vscode/
+firmware/linetrace/wifi_secrets.h
