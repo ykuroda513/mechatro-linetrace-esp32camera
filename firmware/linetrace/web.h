@@ -10,6 +10,10 @@
 //   GET /run?on=1    走行開始 / on=0 停止
 //   GET /save        NVSに保存
 //   GET /reset       初期値に戻す
+//   GET /motor?l=200&r=200&ms=2000&fb=1  モータテスト [mm/s] (自動停止)
+//   GET /calib       duty 100% で回して最高速度 vmax を測定・設定
+//   GET /stop        すべて停止
+//   GET /log         直近3秒の目標/実測速度[mm/s]/duty (JSON, 100Hz)
 // =============================================================
 #pragma once
 

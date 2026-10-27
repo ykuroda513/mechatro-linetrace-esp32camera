@@ -8,6 +8,7 @@
 #include <vector>
 #include "line_detector.h"
 #include "controller.h"
+#include "speed_ctrl.h"
 
 static int fails = 0;
 #define CHECK(cond)                                                     \
@@ -156,6 +157,73 @@ static void testController() {
   CHECK(std::fabs(o.d - 0.1f * 0.1f / 0.02f) < 1e-4f);
 }
 
+// 1次遅れのモータモデル: 速度 y' = (K*duty - y)/tau
+//   K < 1 は「フィードフォワードの見込みより遅い」(電池消耗・負荷) を表す
+static float simulate(spd::SpeedPI& pi, float target, float K, float tau, float T,
+                      float* maxDuty = nullptr) {
+  const float dt = 0.01f;
+  float y = 0;
+  if (maxDuty) *maxDuty = 0;
+  for (float t = 0; t < T; t += dt) {
+    float u = pi.update(target, y, dt);
+    if (maxDuty && std::fabs(u) > *maxDuty) *maxDuty = std::fabs(u);
+    y += (K * u - y) / tau * dt;
+  }
+  return y;
+}
+
+static void testSpeedPI() {
+  std::puts("speed PI");
+  spd::Gains g;  // 既定 kp=0.5 ki=4 ff=1
+  spd::SpeedPI pi;
+  pi.setGains(g);
+
+  // モデルが見込みどおり (K=1): 目標に一致
+  float y = simulate(pi, 0.5f, 1.0f, 0.08f, 1.5f);
+  CHECK(std::fabs(y - 0.5f) < 0.01f);
+
+  // 2割遅いモータ (K=0.8): FFだけだと 0.4 止まりだが、積分で 0.5 に追従
+  pi.reset();
+  y = simulate(pi, 0.5f, 0.8f, 0.08f, 2.0f);
+  CHECK(std::fabs(y - 0.5f) < 0.01f);
+
+  // 逆転も同様
+  pi.reset();
+  y = simulate(pi, -0.4f, 0.8f, 0.08f, 2.0f);
+  CHECK(std::fabs(y + 0.4f) < 0.01f);
+
+  // 到達不能な目標: duty は ±1 に飽和し、積分は上限で止まる (ワインドアップしない)
+  pi.reset();
+  float md = 0;
+  y = simulate(pi, 1.0f, 0.5f, 0.08f, 2.0f, &md);
+  CHECK(md <= 1.0f + 1e-6f);
+  CHECK(pi.integral() <= g.iLimit + 1e-6f);
+  CHECK(std::fabs(y - 0.5f) < 0.02f);
+
+  // 左右の個体差: 片側だけ 3割遅いモータでも 1.5 秒以内に目標の ±2% に入る
+  pi.reset();
+  y = simulate(pi, 0.33f, 0.7f, 0.08f, 1.5f);
+  CHECK(std::fabs(y - 0.33f) < 0.33f * 0.02f);
+
+  // FF が大きく外れていて、積分項で duty を 0.6 以上補う必要がある場合でも定常偏差なし
+  {
+    spd::Gains g2;
+    g2.ff = 0.3f;
+    spd::SpeedPI pi2;
+    pi2.setGains(g2);
+    float y2 = simulate(pi2, 0.4f, 0.5f, 0.08f, 3.0f);   // 必要duty 0.8, FF分 0.12
+    CHECK(std::fabs(y2 - 0.4f) < 0.01f);
+    CHECK(pi2.integral() > 0.6f);
+  }
+
+  // 純粋なFB (ff=0) でも定常偏差なし
+  g.ff = 0;
+  pi.setGains(g);
+  pi.reset();
+  y = simulate(pi, 0.3f, 1.0f, 0.08f, 3.0f);
+  CHECK(std::fabs(y - 0.3f) < 0.01f);
+}
+
 int main() {
   testCenter();
   testOffset();
@@ -164,6 +232,7 @@ int main() {
   testTracking();
   testCrossing();
   testController();
+  testSpeedPI();
   if (fails) { std::printf("\n%d check(s) FAILED\n", fails); return 1; }
   std::puts("\nall tests passed");
   return 0;

@@ -12,8 +12,12 @@
 struct Params {
   // 制御
   float kp, kd, baseSpeed, maxSpeed, curveSlow, lookahead, lostTurn;
+  // 速度フィードバック
+  float spdFb, vmaxL, vmaxR, spdKp, spdKi, spdFf;   // vmax: 左右それぞれの duty100% 時の速度
   // カメラ・画像処理
-  float exposure, gain, minContrast, darkLine;
+  float autoExp, aeLevel, exposure, gain, brightness, contrast, minContrast, darkLine;
+  // モータテストの設定 (Webページのモータテスト欄。ロボット側に持つので表示と実際が必ず一致する)
+  float testL, testR, testMs, testRev;
 };
 
 struct ParamDesc {
@@ -31,9 +35,10 @@ struct Telemetry {
   line::Result det;
   ctrl::Output out;
   float fps = 0;
-  int32_t encL = 0, encR = 0;     // エンコーダ累積カウント
-  float spdL = 0, spdR = 0;       // エンコーダ速度 [count/s]
+  uint32_t encL = 0, encR = 0;    // エンコーダ累積パルス数 (常に増加)
+  float spdL = 0, spdR = 0;       // 車輪速度 [mm/s]
   float vm = 0;                   // モータ電源電圧 [V]
+  int   lumaMean = 0, lumaMax = 0;  // 画像の平均/最大輝度 (白飛び確認用)
   uint32_t frameNo = 0;
 };
 
@@ -43,6 +48,8 @@ Params getParams();
 bool setParam(const char* key, float value);   // 範囲外はクリップ
 void resetParams();
 bool saveParams();          // NVSへ保存
+bool unsaved();             // NVSに保存した内容と現在値が違うか
+uint32_t bootId();          // 起動ごとに変わる番号 (Webページが再起動を検出して表示を読み直す用)
 
 bool running();
 bool cameraOk();

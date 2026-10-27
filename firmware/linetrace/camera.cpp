@@ -70,14 +70,27 @@ bool cameraBegin() {
   return true;
 }
 
-void cameraSetExposure(int exposure, int gain) {
+void cameraSetExposure(bool autoExp, int aeLevel, int exposure, int gain,
+                       int brightness, int contrast) {
   sensor_t* s = esp_camera_sensor_get();
   if (!s) return;
-  s->set_exposure_ctrl(s, 0);   // 自動露出 OFF
-  s->set_aec2(s, 0);
-  s->set_aec_value(s, exposure);
-  s->set_gain_ctrl(s, 0);       // 自動ゲイン OFF
-  s->set_agc_gain(s, gain);
+  s->set_brightness(s, brightness);
+  s->set_contrast(s, contrast);
+  if (autoExp) {
+    s->set_exposure_ctrl(s, 1);   // 自動露出 ON
+    s->set_aec2(s, 1);
+    s->set_ae_level(s, aeLevel);
+    s->set_gain_ctrl(s, 1);       // 自動ゲイン ON
+    s->set_gainceiling(s, GAINCEILING_4X);
+  } else {
+    s->set_exposure_ctrl(s, 0);   // 自動露出 OFF
+    s->set_aec2(s, 0);
+    s->set_aec_value(s, exposure);
+    s->set_gain_ctrl(s, 0);       // 自動ゲイン OFF
+    s->set_agc_gain(s, gain);
+  }
+  Serial.printf("[camera] %s exp=%d gain=%d ae=%d bright=%d cont=%d\n",
+                autoExp ? "AUTO" : "MANUAL", exposure, gain, aeLevel, brightness, contrast);
 }
 
 const uint8_t* cameraGray(const camera_fb_t* fb, int* w, int* h) {

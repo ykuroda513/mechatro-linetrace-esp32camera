@@ -3,35 +3,59 @@
 // =============================================================
 #include "params.h"
 #include <Preferences.h>
+#include <esp_random.h>
 #include <freertos/semphr.h>
 #include "config.h"
 
 const ParamDesc kParamTable[] = {
   // key          label                    member                 min    max    step
-  {"kp",          "Kp 比例ゲイン",          &Params::kp,           0.0f,  3.0f,  0.01f},
-  {"kd",          "Kd 微分ゲイン",          &Params::kd,           0.0f,  0.5f,  0.005f},
-  {"base",        "基準速度",               &Params::baseSpeed,    0.0f,  1.0f,  0.01f},
-  {"max",         "速度上限",               &Params::maxSpeed,     0.0f,  1.0f,  0.01f},
+  {"kp",          "Kp 比例ゲイン [mm/s]",   &Params::kp,           0.0f,  2000.f, 5.f},
+  {"kd",          "Kd 微分ゲイン [mm/s·s]", &Params::kd,           0.0f,  300.f, 1.f},
+  {"base",        "基準速度 [mm/s]",        &Params::baseSpeed,    0.0f,  1500.f, 10.f},
+  {"max",         "速度上限 [mm/s]",        &Params::maxSpeed,     0.0f,  1500.f, 10.f},
   {"slow",        "カーブ減速率",           &Params::curveSlow,    0.0f,  1.0f,  0.01f},
   {"look",        "先読み(遠方の重み)",     &Params::lookahead,    0.0f,  1.0f,  0.01f},
-  {"lost",        "見失い時の旋回",         &Params::lostTurn,     0.0f,  1.0f,  0.01f},
-  {"exposure",    "露出",                   &Params::exposure,     0.0f,  1200.f, 10.f},
-  {"gain",        "ゲイン",                 &Params::gain,         0.0f,  30.0f, 1.0f},
+  {"lost",        "見失い時の旋回 [mm/s]",  &Params::lostTurn,     0.0f,  1000.f, 10.f},
+  {"spdfb",       "速度FB 1=ON / 0=OFF",    &Params::spdFb,        0.0f,  1.0f,  1.0f},
+  {"vmaxl",       "最高速度 左 [mm/s] (duty100%)", &Params::vmaxL,  50.0f, 3000.f, 10.f},
+  {"vmaxr",       "最高速度 右 [mm/s] (duty100%)", &Params::vmaxR,  50.0f, 3000.f, 10.f},
+  {"spdkp",       "速度FB Kp",              &Params::spdKp,        0.0f,  3.0f,  0.01f},
+  {"spdki",       "速度FB Ki",              &Params::spdKi,        0.0f,  30.0f, 0.1f},
+  {"spdff",       "速度FB フィードフォワード", &Params::spdFf,     0.0f,  1.5f,  0.01f},
+  {"autoexp",     "自動露出 1=ON / 0=手動", &Params::autoExp,      0.0f,  1.0f,  1.0f},
+  {"aelevel",     "自動露出の明るさ",       &Params::aeLevel,     -2.0f,  2.0f,  1.0f},
+  {"exposure",    "手動露出",               &Params::exposure,     0.0f,  1200.f, 1.f},
+  {"gain",        "手動ゲイン",             &Params::gain,         0.0f,  30.0f, 1.0f},
+  {"bright",      "明るさ補正",             &Params::brightness,  -2.0f,  2.0f,  1.0f},
+  {"cont",        "コントラスト補正",       &Params::contrast,    -2.0f,  2.0f,  1.0f},
   {"contrast",    "最小コントラスト",       &Params::minContrast,  0.0f,  128.f, 1.0f},
   {"dark",        "黒線=1 / 白線=0",        &Params::darkLine,     0.0f,  1.0f,  1.0f},
+  // key が "t_" で始まるものはモータテスト欄に表示 (パラメータ一覧には出さない)
+  {"t_l",         "テスト 左目標 [mm/s]",   &Params::testL,    -1000.f, 1000.f, 10.f},
+  {"t_r",         "テスト 右目標 [mm/s]",   &Params::testR,    -1000.f, 1000.f, 10.f},
+  {"t_ms",        "テスト 時間 [ms]",       &Params::testMs,     500.f, 3000.f, 100.f},
+  {"t_rev",       "テスト 回転数",          &Params::testRev,      0.0f,  20.0f, 1.0f},
 };
 const int kParamCount = sizeof(kParamTable) / sizeof(kParamTable[0]);
+// Params のメンバはすべて表に載っていること (表示されない隠れた設定値を作らないため)
+static_assert(sizeof(Params) / sizeof(float) == sizeof(kParamTable) / sizeof(kParamTable[0]),
+              "Params のメンバと kParamTable の行数が一致しません");
 
 static const Params kDefault = {
-  DEF_KP, DEF_KD, DEF_BASE_SPEED, DEF_MAX_SPEED, DEF_CURVE_SLOW, DEF_LOOKAHEAD, 0.6f,
-  (float)DEF_EXPOSURE, (float)DEF_GAIN, (float)DEF_MIN_CONTRAST, (float)DEF_LINE_DARK,
+  DEF_KP, DEF_KD, DEF_BASE_SPEED, DEF_MAX_SPEED, DEF_CURVE_SLOW, DEF_LOOKAHEAD, DEF_LOST_TURN,
+  (float)DEF_SPD_FB, DEF_VMAX, DEF_VMAX, DEF_SPD_KP, DEF_SPD_KI, DEF_SPD_FF,
+  (float)DEF_AUTO_EXP, (float)DEF_AE_LEVEL, (float)DEF_EXPOSURE, (float)DEF_GAIN,
+  (float)DEF_BRIGHTNESS, (float)DEF_CONTRAST, (float)DEF_MIN_CONTRAST, (float)DEF_LINE_DARK,
+  200.0f, 200.0f, 2000.0f, 0.0f,
 };
 
-static const uint32_t kNvsVersion = 1;   // Params 構造体を変えたら +1
+static const uint32_t kNvsVersion = 6;   // Params 構造体を変えたら +1
 
 namespace {
 SemaphoreHandle_t mtx;
 Params params = kDefault;
+Params savedParams = kDefault;   // NVS に入っている内容 (未保存の変更の検出用)
+uint32_t bootIdValue = 0;
 Telemetry telem;
 bool runFlag = false;
 bool camOk = false;
@@ -52,6 +76,7 @@ namespace shared {
 
 void begin() {
   mtx = xSemaphoreCreateMutex();
+  bootIdValue = esp_random();
   // PSRAMがあればPSRAM、なければ内蔵RAMに確保
   frameBuf = (uint8_t*)(psramFound() ? ps_malloc(FRAME_CAP) : malloc(FRAME_CAP));
 
@@ -59,6 +84,7 @@ void begin() {
   if (p.begin("linetrace", true)) {
     if (p.getUInt("ver", 0) == kNvsVersion && p.getBytesLength("params") == sizeof(Params)) {
       p.getBytes("params", &params, sizeof(Params));
+      savedParams = params;
       Serial.println("[params] loaded from NVS");
     }
     p.end();
@@ -81,6 +107,9 @@ bool setParam(const char* key, float v) {
   return false;
 }
 
+bool unsaved() { Lock l; return memcmp(&params, &savedParams, sizeof(Params)) != 0; }
+uint32_t bootId() { return bootIdValue; }
+
 void resetParams() { Lock l; params = kDefault; camDirty = true; }
 
 bool saveParams() {
@@ -90,7 +119,10 @@ bool saveParams() {
   p.putUInt("ver", kNvsVersion);
   size_t n = p.putBytes("params", &copy, sizeof(Params));
   p.end();
-  return n == sizeof(Params);
+  if (n != sizeof(Params)) return false;
+  Lock l;
+  savedParams = copy;
+  return true;
 }
 
 bool running() { Lock l; return runFlag; }
